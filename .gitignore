@@ -10,10 +10,8 @@ script
 kernel/kpimg
 kernel/kpimg.elf
 ndk
-patch
 tools
 note11tpro
-
 
 *.o
 *.exe
