@@ -15,7 +15,7 @@
 #include <string.h>
 #include <errno.h>
 
-#include "version"
+#include "../version"
 
 #include "preset.h"
 #include "image.h"
