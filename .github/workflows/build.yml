@@ -6,7 +6,7 @@ on:
 
 jobs:
   Build-kpimg:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -85,7 +85,7 @@ jobs:
  
 
   Build-android-kptools:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -108,14 +108,8 @@ jobs:
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r26b
+          ndk-version: r21b
           add-to-path: true
-
-      - name: Make hdr
-        run: |
-          export TARGET_COMPILE=placeholder
-          cd kernel
-          make hdr
 
       - name: Build kptools-android
         run: |
@@ -142,7 +136,7 @@ jobs:
  
 
   Build-kptools-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -157,12 +151,6 @@ jobs:
           VERSION="$MAJOR.$MINOR.$PATCH"
           echo "Generated Version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Make hdr
-        run: |
-          export TARGET_COMPILE=placeholder
-          cd kernel
-          make hdr
 
       - name: Build kptools
         run: |
@@ -185,7 +173,7 @@ jobs:
  
 
   Build-kptools-mac:
-    runs-on: ubuntu-22.04
+    runs-on: macos-latest
     permissions:
       contents: write
     steps:
@@ -201,11 +189,6 @@ jobs:
           echo "Generated Version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Make hdr
-        run: |
-          export TARGET_COMPILE=placeholder
-          cd kernel
-          make hdr
 
       - name: Build kptools
         run: |
