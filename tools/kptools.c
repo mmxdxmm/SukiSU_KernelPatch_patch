@@ -15,7 +15,7 @@
 #include <string.h>
 #include <errno.h>
 
-#include "../version"
+#include "version"
 
 #include "preset.h"
 #include "image.h"
@@ -139,6 +139,7 @@ int main(int argc, char *argv[])
             break;
         case 'S':
             root_skey = true;
+            break;
         case 's':
             superkey = optarg;
             break;
@@ -177,6 +178,7 @@ int main(int argc, char *argv[])
             break;
         }
     }
+
     int ret = 0;
 
     if (cmd == 'h') {

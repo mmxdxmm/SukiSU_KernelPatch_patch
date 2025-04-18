@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <inttypes.h>
 
 #include <string.h>
 

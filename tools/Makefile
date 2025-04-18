@@ -1,6 +1,8 @@
+CC = gcc
 
 CFLAGS = -std=c11 -Wall -Wextra -Wno-unused -Wno-unused-parameter
-LDFLAGS = -lz
+LDFLAGS = -static -lz
+
 ifdef DEBUG
 	CFLAGS += -DDEBUG -g
 endif
@@ -13,7 +15,7 @@ all: kptools
 
 .PHONY: kptools
 kptools: ${objs}
-	${CC} -o $@ $^ $(LDFLAGS)
+	$(CC) -o $@ $^ $(LDFLAGS)
 
 %.o : %.c
 	$(CC) -c $(CFLAGS) $(CPPFLAGS) $< -o $@
