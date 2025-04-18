@@ -1,0 +1,5 @@
+/root/other/patch/build-linux/CMakeFiles/encrypt.dir
+/root/other/patch/build-linux/CMakeFiles/generate_headers.dir
+/root/other/patch/build-linux/CMakeFiles/patch.dir
+/root/other/patch/build-linux/CMakeFiles/edit_cache.dir
+/root/other/patch/build-linux/CMakeFiles/rebuild_cache.dir

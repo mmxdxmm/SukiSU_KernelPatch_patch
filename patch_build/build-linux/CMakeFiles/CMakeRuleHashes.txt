@@ -1,0 +1,5 @@
+# Hashes of file build rules.
+eb1ca9e4970d38a202ae3c8255643bb0 CMakeFiles/generate_headers
+ecd49fc3f7c76df8c625926f62eebb44 include/kpimg_enc.h
+d90e335aa8363ef00fcf4809085d3cc7 include/kptools_linux.h
+3be28c8afdd5e0e5d41604ac74d13489 res/kpimg.enc
