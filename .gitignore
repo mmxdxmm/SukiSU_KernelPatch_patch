@@ -4,26 +4,5 @@
 
 **/.DS_Store
 
-build
 test
 script
-kernel/kpimg
-kernel/kpimg.elf
-ndk
-tools
-note11tpro
-
-*.o
-*.exe
-*.rar
-*.elf
-*.bat
-*.sh
-*.c1
-*.kpm
-*.log
-kpimg
-Image
-oImage
-
-
