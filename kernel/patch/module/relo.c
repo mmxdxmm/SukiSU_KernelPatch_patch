@@ -282,11 +282,21 @@ int apply_relocate_add(Elf64_Shdr *sechdrs, const char *strtab, unsigned int sym
         case R_AARCH64_ADR_PREL_PG_HI21:
             ovf = reloc_insn_imm(RELOC_OP_PAGE, loc, val, 12, 21, AARCH64_INSN_IMM_ADR);
             break;
+        /* 支持 ADR_GOT（311） */
+       case R_AARCH64_ADR_GOT_PAGE:  /* 311 */
+           overflow_check = false;
+           ovf = reloc_insn_imm(RELOC_OP_PAGE, loc, val, 12, 21, AARCH64_INSN_IMM_ADR);
+           break;
         case R_AARCH64_ADD_ABS_LO12_NC:
         case R_AARCH64_LDST8_ABS_LO12_NC:
             overflow_check = false;
             ovf = reloc_insn_imm(RELOC_OP_ABS, loc, val, 0, 12, AARCH64_INSN_IMM_12);
             break;
+        /* 支持 ADD_ABS_LO12_GOT（323） */
+       case R_AARCH64_ADD_ABS_LO12_GOT:  /* 323 */
+           overflow_check = false;
+           ovf = reloc_insn_imm(RELOC_OP_ABS, loc, val, 0, 12, AARCH64_INSN_IMM_12);
+           break;
         case R_AARCH64_LDST16_ABS_LO12_NC:
             overflow_check = false;
             ovf = reloc_insn_imm(RELOC_OP_ABS, loc, val, 1, 11, AARCH64_INSN_IMM_12);
