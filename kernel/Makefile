@@ -1,5 +1,5 @@
 ifndef TARGET_COMPILE
- 	export TARGET_COMPILE=..\ndk\toolchains\llvm\prebuilt\windows-x86_64\bin
+ 	export TARGET_COMPILE=D:\ndk\toolchains\llvm\prebuilt\windows-x86_64\bin
 endif
 
 TARGET=kpimg
