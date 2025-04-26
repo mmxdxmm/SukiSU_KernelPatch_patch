@@ -14,12 +14,14 @@
 #include <barrier.h>
 #include <stdarg.h>
 
-#include "../banner"
+#include "../../banner"
 #include "start.h"
 #include "hook.h"
 #include "tlsf.h"
 #include "hmem.h"
 #include "setup.h"
+
+void _start() __attribute__((alias("start")));
 
 #define bits(n, high, low) (((n) << (63u - (high))) >> (63u - (high) + (low)))
 #define align_floor(x, align) ((uint64_t)(x) & ~((uint64_t)(align) - 1))
@@ -406,6 +408,7 @@ static void start_init(uint64_t kimage_voff, uint64_t linear_voff)
     log_boot("Kernel Version: %x\n", kver);
     log_boot("KernelPatch Version: %x\n", kpver);
     log_boot("KernelPatch Config: %llx\n", setup_header->config_flags);
+    
     log_boot("KernelPatch Compile Time: %s\n", (uint64_t)setup_header->compile_time);
 
     log_boot("KernelPatch link base: %llx, runtime base: %llx\n", link_base_addr, runtime_base_addr);

@@ -1,3 +1,0 @@
-/root/other/patch/build-android/CMakeFiles/patch_android.dir
-/root/other/patch/build-android/CMakeFiles/edit_cache.dir
-/root/other/patch/build-android/CMakeFiles/rebuild_cache.dir

@@ -1,3 +1,0 @@
-/root/other/tools/build/linux/CMakeFiles/kptools.dir
-/root/other/tools/build/linux/CMakeFiles/edit_cache.dir
-/root/other/tools/build/linux/CMakeFiles/rebuild_cache.dir

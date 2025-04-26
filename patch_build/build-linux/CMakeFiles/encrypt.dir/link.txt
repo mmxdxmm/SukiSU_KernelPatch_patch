@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/encrypt.dir/encrypt.cpp.o -o encrypt 

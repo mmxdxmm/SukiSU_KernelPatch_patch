@@ -139,7 +139,6 @@ int main(int argc, char *argv[])
             break;
         case 'S':
             root_skey = true;
-            break;
         case 's':
             superkey = optarg;
             break;
@@ -178,7 +177,6 @@ int main(int argc, char *argv[])
             break;
         }
     }
-
     int ret = 0;
 
     if (cmd == 'h') {

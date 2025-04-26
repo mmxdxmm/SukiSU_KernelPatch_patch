@@ -1,3 +1,4 @@
+ENTRY(start)
 OUTPUT_ARCH(aarch64)
 
 _link_base = 64k - 3 * 4k;

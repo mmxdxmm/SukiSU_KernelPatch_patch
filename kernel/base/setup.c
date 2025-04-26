@@ -4,7 +4,7 @@
  */
 
 #include "setup.h"
-#include "../version"
+#include "../../version"
 
 setup_header_t header __section(.setup.header) = { .magic = KP_MAGIC,
                                                    .kp_version.major = MAJOR,
