@@ -3,7 +3,7 @@
 
 #include <ktypes.h>
 #include <asm-generic/rwonce.h>
-#include <asm/barrier.h>
+#include <barrier.h>
 #include <linux/poison.h>
 #include <linux/container_of.h>
 

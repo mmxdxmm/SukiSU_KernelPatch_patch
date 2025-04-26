@@ -59,10 +59,11 @@ static void after_execv(hook_fargs5_t *args, void *udata)
     unhook_syscalln(__NR_execve, before_execve, after_execv);
     unhook_syscalln(__NR_execveat, before_execve, after_execv);
 }
-
+#define _UNUSED(x) (void)(x)
 int resolve_pt_regs()
 {
     hook_err_t ret = 0;
+    _UNUSED(ret);
     hook_err_t rc = HOOK_NO_ERR;
 
     rc = hook_syscalln(__NR_execve, 3, before_execve, after_execv, (void *)__NR_execve);

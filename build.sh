@@ -4,6 +4,7 @@ set -e
 HOME=/root/other
 TOOLS=/root/other/tools
 PATCH=/root/other/patch
+KERNEL=/root/other/kernel
 # 构建 Android 版本
 cd $TOOLS
 rm -rf build/android
@@ -25,12 +26,18 @@ cmake ..
 make
 mv kptools kptools-linux
 
+cd $KERNEL
+
+make clean
+make
+
 cd $HOME
 
 export ANDROID_NDK=/root/other/ndk/android-ndk-r28
 
 cp -r $TOOLS/build/android/kptools-android $PATCH/res
 cp -r $TOOLS/build/kptools-linux $PATCH/res
+cp -r $KERNEL/kpimg $PATCH/res
 
 cd $PATCH
 

@@ -1,16 +1,17 @@
 ifndef TARGET_COMPILE
- 	export TARGET_COMPILE=D:\ndk\toolchains\llvm\prebuilt\windows-x86_64\bin
+    TARGET_COMPILE=/root/other/ndk/android-ndk-r28/toolchains/llvm/prebuilt/linux-x86_64/bin
 endif
 
 TARGET=kpimg
 
-CC = $(TARGET_COMPILE)\aarch64-linux-android31-clang
-LD = $(TARGET_COMPILE)\ld.lld
-AS = $(TARGET_COMPILE)\llvm-as
-OBJCOPY = $(TARGET_COMPILE)\llvm-objcopy
+CC = $(TARGET_COMPILE)/aarch64-linux-android35-clang
+LD = $(TARGET_COMPILE)/ld.lld
+AS = $(TARGET_COMPILE)/llvm-as
+OBJCOPY = $(TARGET_COMPILE)/llvm-objcopy
 
 CFLAGS += -Wall -fno-builtin -std=gnu11 -nostdinc
 CFLAGS += -g
+CFLAGS += -Wno-unused-function -Wno-return-type -Wno-c23-extensions -Wno-uninitialized
 CFLAGS += -fno-PIC -fno-asynchronous-unwind-tables -fno-stack-protector -fno-unwind-tables -fno-semantic-interposition -U_FORTIFY_SOURCE -fno-common
 
 ifdef DEBUG
@@ -21,7 +22,7 @@ endif
 	CFLAGS += -DANDROID
 # endif
 
-INCLUDE := -I. -Iinclude -Ipatch/include -Ilinux -Ilinux/include -Ilinux/arch/arm64/include -Ilinux/tools/arch/arm64/include -Ikernel-source
+INCLUDE := -I. -Iinclude -Ipatch/include -Ilinux -Ilinux/include -Ilinux/arch/arm64/include -Ilinux/tools/arch/arm64/include -Ikernel-source -I$(TARGET_COMPILE)/../sysroot/usr/include -I$(TARGET_COMPILE)/../sysroot/usr/include/aarch64-linux-android
 
 BASE_SRCS += base/setup.c 
 BASE_SRCS += base/setup1.S
@@ -43,9 +44,6 @@ BASE_SRCS += $(wildcard patch/common/*.c)
 BASE_SRCS += $(wildcard patch/module/*.c)
 BASE_SRCS += $(wildcard patch/ksyms/*.c)
 
-# ifdef ANDROID
-#	BASE_SRCS += $(wildcard patch/android/*.c)
-#endif
 BASE_SRCS += patch/android/sepolicy_flags.c
 
 BASE_SRCS += $(wildcard patch/sukisu/*.c)
@@ -57,13 +55,16 @@ SRCS += $(LINUX_SRCS)
 OBJS := $(SRCS:.c=.o)
 OBJS := $(OBJS:.S=.o)
 
+
+LDFLAGS += -Tkpimg.lds --no-relax
+
 all: ${TARGET}
 
 ${TARGET}: ${TARGET}.elf
 	${OBJCOPY} -O binary -S $^ $@
 
 ${TARGET}.elf: ${OBJS}
-	${LD} -nostdlib -static -no-pie -Tkpimg.lds -o $@ $^
+	${LD} -nostdlib -static -no-pie -Tkpimg.lds -e start -o $@ $^
 
 %.o: %.c
 	${CC} $(CFLAGS) $(INCLUDE) -c -O2 -o $@ $<
@@ -71,15 +72,8 @@ ${TARGET}.elf: ${OBJS}
 %.o: %.S
 	${CC} $(CFLAGS) $(INCLUDE) -c -o $@ $<
 
-# .PHONY: hdr
-# hdr:
-#	cp -Rf patch/include/uapi ../user/
-#	cp -f ../version ../user/
-#	cp -f include/preset.h ../tools/
-
-
 .PHONY: clean
 clean:
-	del /f *.elf
-	del /f kpimg
-	del /s *.o
+	rm -rf *.elf
+	rm -rf kpimg
+	find . -name *.o | xargs rm -f
