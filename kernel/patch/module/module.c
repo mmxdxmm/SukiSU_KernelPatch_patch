@@ -653,7 +653,7 @@ int get_module_info(const char *name, char *out_info, int size)
                       mod->args);
 
     if (sz > 0) out_info[sz - 1] = '\0';
-    logkfd("%s", out_info);
+    // logkfd("%s", out_info);
 
     rcu_read_unlock();
     return sz;
