@@ -5,9 +5,11 @@ HOME=/root/other
 TOOLS=/root/other/tools
 PATCH=/root/other/patch
 KERNEL=/root/other/kernel
+
+export NDK_HOME=/root/.android/sdk/ndk/28.0.13004108
 # 构建 Android 版本
 cd $TOOLS
-rm -rf build/android
+rm -rf build
 mkdir -p build/android
 cd build/android
 # 请替换以下变量为实际 NDK 路径或通过环境变量传递
@@ -33,7 +35,10 @@ make
 
 cd $HOME
 
-export ANDROID_NDK=/root/other/ndk/android-ndk-r28
+export ANDROID_NDK=/root/.android/sdk/ndk/28.0.13004108
+
+rm -rf $PATCH/res/kpimg.enc
+rm -rf $PATCH/res/kpimg
 
 cp -r $TOOLS/build/android/kptools-android $PATCH/res
 cp -r $TOOLS/build/kptools-linux $PATCH/res
@@ -41,6 +46,9 @@ cp -r $KERNEL/kpimg $PATCH/res
 
 cd $PATCH
 
+g++ -o encrypt encrypt.cpp -O3 -std=c++17
+chmod 777 ./encrypt
+./encrypt res/kpimg res/kpimg.enc
 xxd -i res/kpimg.enc > include/kpimg_enc.h
 xxd -i res/kptools-linux > include/kptools_linux.h
 xxd -i res/kptools-android > include/kptools_android.h
