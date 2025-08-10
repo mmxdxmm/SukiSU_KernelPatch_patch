@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-HOME=/root/other
-TOOLS=/root/other/tools
-PATCH=/root/other/patch
-KERNEL=/root/other/kernel
+HOME=$(pwd)
+TOOLS=$(pwd)/tools
+PATCH=$(pwd)/patch
+KERNEL=$(pwd)/kernel
 
 export NDK_HOME=/root/.android/sdk/ndk/28.0.13004108
 # 构建 Android 版本
