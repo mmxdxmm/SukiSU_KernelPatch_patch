@@ -6,7 +6,7 @@ TOOLS=$(pwd)/tools
 PATCH=$(pwd)/patch
 KERNEL=$(pwd)/kernel
 
-export NDK_HOME=/android-ndk-r28c
+export NDK_HOME=$PWD/android-ndk-r28c
 # 构建 Android 版本
 cd $TOOLS
 rm -rf build
