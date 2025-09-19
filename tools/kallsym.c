@@ -559,50 +559,54 @@ static int is_symbol_name_pos(kallsym_t *info, char *img, int32_t pos, char *sym
 static int find_names(kallsym_t *info, char *img, int32_t imglen)
 {
     int32_t marker_elem_size = get_markers_elem_size(info);
-    // int32_t cand = info->_approx_addresses_or_offsets_offset;
-    int32_t cand = 0x4000;
+    int32_t cand = info->kallsyms_offsets_offset + info->kallsyms_num_syms * 4;
     int32_t test_marker_num = -1;
+    int32_t max_search = info->kallsyms_markers_offset - cand;
+    
+    if (cand <= 0 || cand >= imglen || max_search <= 0) {
+        tools_loge("Invalid search range for kallsyms_names\n");
+        return -1;
+    }
+
     for (; cand < info->kallsyms_markers_offset; cand++) {
         int32_t pos = cand;
-        test_marker_num = KSYM_FIND_NAMES_USED_MARKER; // check n * 256 symbols
-        for (int32_t i = 0;; i++) {
+        int32_t symbol_count = 0;
+        test_marker_num = KSYM_FIND_NAMES_USED_MARKER;
+        
+        while (pos < info->kallsyms_markers_offset && pos < imglen) {
             int32_t len = *(uint8_t *)(img + pos++);
-            if (len > 0x7F) len = (len & 0x7F) + (*(uint8_t *)(img + pos++) << 7);
-            if (!len || len >= KSYM_SYMBOL_LEN) break;
+            if (len > 0x7F) {
+                if (pos >= imglen) break;
+                len = (len & 0x7F) + (*(uint8_t *)(img + pos++) << 7);
+            }
+            
+            if (len <= 0 || len >= KSYM_SYMBOL_LEN) break;
+            
             pos += len;
-            if (pos >= info->kallsyms_markers_offset) break;
-
-            if (i && (i & 0xFF) == 0xFF) { // every 256 symbols
-                int32_t mark_len = int_unpack(img + info->kallsyms_markers_offset + ((i >> 8) + 1) * marker_elem_size,
-                                              marker_elem_size, info->is_be);
+            symbol_count++;
+            
+            if (symbol_count > 0 && (symbol_count & 0xFF) == 0) {
+                int32_t mark_index = (symbol_count >> 8) - 1;
+                int32_t mark_offset = info->kallsyms_markers_offset + mark_index * marker_elem_size;
+                
+                if (mark_offset < 0 || mark_offset + marker_elem_size > imglen) break;
+                
+                int32_t mark_len = int_unpack(img + mark_offset, marker_elem_size, info->is_be);
                 if (pos - cand != mark_len) break;
+                
                 if (!--test_marker_num) break;
             }
         }
         if (!test_marker_num) break;
     }
+    
     if (test_marker_num) {
         tools_loge("find kallsyms_names error\n");
         return -1;
     }
+    
     info->kallsyms_names_offset = cand;
     tools_logi("kallsyms_names offset: 0x%08x\n", cand);
-
-#if 0
-    // print all symbol for test
-    // if CONFIG_KALLSYMS=y and CONFIG_KALLSYMS_ALL=n
-    // kallsyms_names table in kernel image will be truncated, and only functions exported
-    int32_t pos = info->kallsyms_names_offset;
-    int32_t index = 0;
-    char symbol[KSYM_SYMBOL_LEN] = { '\0' };
-    while (pos < info->kallsyms_markers_offset) {
-        memset(symbol, 0, sizeof(symbol));
-        int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
-        if (ret) break;
-        tools_logi("index: %d, %08x, symbol: %s\n", index, pos, symbol);
-        index++;
-    }
-#endif
     return 0;
 }
 
