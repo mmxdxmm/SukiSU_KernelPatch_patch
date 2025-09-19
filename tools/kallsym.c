@@ -559,54 +559,93 @@ static int is_symbol_name_pos(kallsym_t *info, char *img, int32_t pos, char *sym
 static int find_names(kallsym_t *info, char *img, int32_t imglen)
 {
     int32_t marker_elem_size = get_markers_elem_size(info);
-    int32_t cand = info->kallsyms_offsets_offset + info->kallsyms_num_syms * 4;
-    int32_t test_marker_num = -1;
-    int32_t max_search = info->kallsyms_markers_offset - cand;
     
-    if (cand <= 0 || cand >= imglen || max_search <= 0) {
-        tools_loge("Invalid search range for kallsyms_names\n");
+    // 计算kallsyms_names的起始位置
+    int32_t cand = info->kallsyms_offsets_offset + 
+                  (info->kallsyms_num_syms * (info->is_64bit ? 8 : 4));
+    
+    tools_logi("Calculated names start: 0x%08x\n", cand);
+    
+    // 边界检查增强
+    if (cand <= 0 || cand >= imglen || 
+        info->kallsyms_markers_offset <= cand) {
+        tools_loge("Invalid search range: cand=0x%08x, markers=0x%08x, imglen=0x%08x\n",
+                   cand, info->kallsyms_markers_offset, imglen);
         return -1;
     }
-
+    
+    int32_t max_search = info->kallsyms_markers_offset - cand;
+    int32_t test_marker_num = -1;
+    int32_t found = 0;
+    
     for (; cand < info->kallsyms_markers_offset; cand++) {
         int32_t pos = cand;
         int32_t symbol_count = 0;
         test_marker_num = KSYM_FIND_NAMES_USED_MARKER;
+        int valid = 1;
         
-        while (pos < info->kallsyms_markers_offset && pos < imglen) {
-            int32_t len = *(uint8_t *)(img + pos++);
-            if (len > 0x7F) {
+        while (valid && pos < info->kallsyms_markers_offset && pos < imglen) {
+            // 读取符号长度
+            uint8_t len_byte = *(uint8_t *)(img + pos++);
+            int32_t len;
+            
+            if (len_byte & 0x80) {
+                // 处理扩展长度
                 if (pos >= imglen) break;
-                len = (len & 0x7F) + (*(uint8_t *)(img + pos++) << 7);
+                uint8_t len_byte2 = *(uint8_t *)(img + pos++);
+                len = (len_byte & 0x7F) | (len_byte2 << 7);
+            } else {
+                len = len_byte;
             }
             
-            if (len <= 0 || len >= KSYM_SYMBOL_LEN) break;
+            // 验证长度有效性
+            if (len <= 0 || len >= KSYM_SYMBOL_LEN) {
+                valid = 0;
+                break;
+            }
             
+            // 移动到下一个符号
             pos += len;
             symbol_count++;
             
+            // 每256个符号检查一次标记
             if (symbol_count > 0 && (symbol_count & 0xFF) == 0) {
                 int32_t mark_index = (symbol_count >> 8) - 1;
-                int32_t mark_offset = info->kallsyms_markers_offset + mark_index * marker_elem_size;
+                int32_t mark_offset = info->kallsyms_markers_offset + 
+                                     mark_index * marker_elem_size;
                 
-                if (mark_offset < 0 || mark_offset + marker_elem_size > imglen) break;
+                // 标记边界检查
+                if (mark_offset < 0 || 
+                    mark_offset + marker_elem_size > imglen ||
+                    mark_offset + marker_elem_size > info->kallsyms_markers_offset) {
+                    valid = 0;
+                    break;
+                }
                 
+                // 获取标记值并验证
                 int32_t mark_len = int_unpack(img + mark_offset, marker_elem_size, info->is_be);
-                if (pos - cand != mark_len) break;
+                if (pos - cand != mark_len) {
+                    valid = 0;
+                    break;
+                }
                 
                 if (!--test_marker_num) break;
             }
         }
-        if (!test_marker_num) break;
+        
+        if (valid && !test_marker_num) {
+            found = 1;
+            break;
+        }
     }
     
-    if (test_marker_num) {
+    if (!found) {
         tools_loge("find kallsyms_names error\n");
         return -1;
     }
     
     info->kallsyms_names_offset = cand;
-    tools_logi("kallsyms_names offset: 0x%08x\n", cand);
+    tools_logi("Found kallsyms_names at: 0x%08x\n", cand);
     return 0;
 }
 
