@@ -34,7 +34,7 @@ jobs:
             cmake ninja-build \
             u-boot-tools python3 \
             zstd clang lld \
-            lz4 cmake
+            lz4
 
       # LLVM-20 installation (commented out)
       # - name: Download and Install LLVM
