@@ -1,6 +1,6 @@
 #!/bin/bash
 # 设置NDK路径（示例路径，请根据实际情况修改）
-export ANDROID_NDK=ANDROID_NDK=/root/.android/sdk/ndk/28.0.13004108
+export ANDROID_NDK=ANDROID_NDK=/root/android-ndk-r28c
 
 xxd -i res/kpimg.enc > include/kpimg_enc.h
 xxd -i res/kptools-linux > include/kptools_linux.h
