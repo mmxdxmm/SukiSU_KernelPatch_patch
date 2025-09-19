@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10...3.28)
 project(kptools)
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
