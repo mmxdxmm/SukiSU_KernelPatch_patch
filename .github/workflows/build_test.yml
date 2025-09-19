@@ -45,7 +45,7 @@ jobs:
 
       - name: install tools
         run: |
-          bash install_tools.sh | tee out1.txt
+          sudo bash install_tools.sh | tee out1.txt
           
       - name: Build patch
         run: |
