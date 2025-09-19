@@ -43,9 +43,12 @@ jobs:
       #     chmod +x llvm.sh
       #     sudo ./llvm.sh 20
 
-      - name: Build patch
+      - name: install tools
         run: |
           bash install_tools.sh | tee out1.txt
+          
+      - name: Build patch
+        run: |
           bash build.sh | tee out2.txt
 
       - name: Upload Artifacts
