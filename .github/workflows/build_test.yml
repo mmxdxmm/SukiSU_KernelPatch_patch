@@ -43,14 +43,16 @@ jobs:
       #     chmod +x llvm.sh
       #     sudo ./llvm.sh 20
 
-      - name: Build Kernel
+      - name: Build patch
         run: |
-          bash build.sh | tee out.txt
+          bash install_tools.sh | tee out1.txt
+          bash build.sh | tee out2.txt
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-output
           path: |
-            out.txt
+            out1.txt
+            out2.txt
             patch_*
