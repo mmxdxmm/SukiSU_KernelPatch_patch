@@ -41,36 +41,31 @@ static void *memmem(const void *haystack, size_t haystack_len, const void *const
 
 static int find_linux_banner(kallsym_t *info, char *img, int32_t imglen)
 {
+    /*
+	// todo: linux_proc_banner
+  const char linux_banner[] =
+        "Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
+        LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
+  Linux version 4.9.270-g862f51bac900-ab7613625 (android-build@abfarm-east4-101)
+  (Android (7284624, based on r416183b) clang version 12.0.5
+  (https://android.googlesource.com/toolchain/llvm-project
+  c935d99d7cf2016289302412d708641d52d2f7ee)) #0 SMP PREEMPT Thu Aug 5 07:04:42
+  UTC 2021
+  */
     char linux_banner_prefix[] = "Linux version ";
     size_t prefix_len = strlen(linux_banner_prefix);
 
     char *imgend = img + imglen;
     char *banner = (char *)img;
     info->banner_num = 0;
-    
-    memset(info->linux_banner_offset, 0, sizeof(info->linux_banner_offset));
-    
     while ((banner = (char *)memmem(banner + 1, imgend - banner - 1, linux_banner_prefix, prefix_len)) != NULL) {
-        if (isdigit(*(banner + prefix_len)) && 
-            (*(banner + prefix_len + 1) == '.' || isdigit(*(banner + prefix_len + 1)))) {
-            
-            if (info->banner_num >= MAX_BANNER_NUM) {
-                tools_logw("too many linux_banner found, stopping at %d\n", MAX_BANNER_NUM);
-                break;
-            }
-            
+        if (isdigit(*(banner + prefix_len)) && *(banner + prefix_len + 1) == '.') {
             info->linux_banner_offset[info->banner_num++] = (int32_t)(banner - img);
             tools_logi("linux_banner %d: %s", info->banner_num, banner);
             tools_logi("linux_banner offset: 0x%lx\n", banner - img);
         }
     }
-    
-    if (info->banner_num == 0) {
-        tools_loge("no linux_banner found in image\n");
-        return -1;
-    }
-    
-    char *banner = img + info->linux_banner_offset[info->banner_num - 1];
+    banner = img + info->linux_banner_offset[info->banner_num - 1];
 
     char *uts_release_start = banner + prefix_len;
     char *space = strchr(banner + prefix_len, ' ');
@@ -87,6 +82,9 @@ static int find_linux_banner(kallsym_t *info, char *img, int32_t imglen)
 
     tools_logi("kernel version major: %d, minor: %d, patch: %d\n", info->version.major, info->version.minor,
                info->version.patch);
+
+    tools_logi("Banner virtual address: %p", (void*)(banner - img + info->kernel_base));
+    
     return 0;
 }
 
@@ -786,8 +784,8 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
         int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
         if (ret) return ret;
 
-        if (!strcmp(symbol, "linux_banner")) {
-            tools_logi("names table linux_banner index: 0x%08x\n", index);
+        if (strstr(symbol, "linux_banner")) {
+            tools_logi("Found matching symbol: %s at index: 0x%08x\n", symbol, index);
             found_linux_banner = 1;
             break;
         }
@@ -795,68 +793,39 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
     }
 
     if (!found_linux_banner) {
-        tools_logw("linux_banner not found in names table, trying alternative symbols\n");
-        
-        pos = info->kallsyms_names_offset;
-        index = 0;
-        
-        const char* alternative_symbols[] = {
-            "init_task", "start_kernel", "cpu_number", "memstart_addr", 
-            "kern_addr_valid", "vmalloc", NULL
-        };
-        
-        int found_alternative = 0;
-        while (pos < info->kallsyms_markers_offset) {
-            memset(symbol, 0, sizeof(symbol));
-            int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
-            if (ret) return ret;
-
-            for (int i = 0; alternative_symbols[i] != NULL; i++) {
-                if (!strcmp(symbol, alternative_symbols[i])) {
-                    tools_logi("found alternative symbol: %s at index: 0x%08x\n", symbol, index);
-                    found_alternative = 1;
-                    info->used_alternative_symbol = 1;
-                    info->alternative_symbol_index = index;
-                    info->alternative_symbol_name = strdup(symbol);
-                    break;
-                }
-            }
-            
-            if (found_alternative) break;
-            index++;
-        }
-        
-        if (!found_alternative) {
-            tools_loge("no known symbols found in names table\n");
-            return -1;
-        }
+        tools_loge("No linux_banner found in names table. Searched %d symbols\n", index);
+        return -1;
     }
-
     info->symbol_banner_idx = -1;
+
+    int32_t elem_size = info->has_relative_base ? 
+        get_offsets_elem_size(info) : get_addresses_elem_size(info);
+    int32_t search_range = info->kallsyms_num_syms * elem_size + 4096;
+    
+    tools_logi("Search range: 0x%08x to 0x%08x\n", 
+               info->_approx_addresses_or_offsets_offset,
+               info->_approx_addresses_or_offsets_offset + search_range);
 
     for (int i = 0; i < info->banner_num; i++) {
         int32_t target_offset = info->linux_banner_offset[i];
-
-        int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
         pos = info->_approx_addresses_or_offsets_offset;
+        int32_t end = pos + search_range;
 
-        int32_t end = pos + 4096 + elem_size;
         for (; pos < end; pos += elem_size) {
             uint64_t base = uint_unpack(img + pos, elem_size, info->is_be);
+            int32_t offset = uint_unpack(img + pos + index * elem_size, elem_size, info->is_be) - base;
             
-            int32_t symbol_index = info->used_alternative_symbol ? info->alternative_symbol_index : index;
-            int32_t offset = uint_unpack(img + pos + symbol_index * elem_size, elem_size, info->is_be) - base;
-            
-            if (offset == target_offset) break;
+            if (offset == target_offset) {
+                info->symbol_banner_idx = i;
+                tools_logi("Matched linux_banner at index: %d, offset: 0x%08x\n", i, pos);
+                break;
+            }
         }
-        if (pos < end) {
-            info->symbol_banner_idx = i;
-            tools_logi("linux_banner index: %d\n", i);
-            break;
-        }
+        if (info->symbol_banner_idx >= 0) break;
     }
+
     if (info->symbol_banner_idx < 0) {
-        tools_loge("correct address or offsets error\n");
+        tools_loge("Failed to correct address or offsets after %d attempts\n", info->banner_num);
         return -1;
     }
 
@@ -872,11 +841,9 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
         tools_logi("kernel base address: 0x%" PRIx64 "\n", info->kernel_base);
     }
 
-    if (!info->used_alternative_symbol) {
-        int32_t pid_vnr_offset = get_symbol_offset(info, img, "pid_vnr");
-        if (arm64_verify_pid_vnr(info, img, pid_vnr_offset)) {
-            tools_logw("pid_vnr verification failed\n");
-        }
+    int32_t pid_vnr_offset = get_symbol_offset(info, img, "pid_vnr");
+    if (arm64_verify_pid_vnr(info, img, pid_vnr_offset)) {
+        tools_logw("pid_vnr verification failed\n");
     }
 
     return 0;
@@ -892,14 +859,8 @@ static int correct_addresses_or_offsets(kallsym_t *info, char *img, int32_t imgl
     if (rc) {
         info->is_kallsysms_all_yes = 0;
         tools_logw("no linux_banner, CONFIG_KALLSYMS_ALL=n\n");
-        
-        if (info->used_alternative_symbol) {
-            tools_logi("using alternative symbol %s for correction\n", info->alternative_symbol_name);
-            rc = 0;
-        } else {
-            rc = correct_addresses_or_offsets_by_vectors(info, img, imglen);
-        }
     }
+    if (rc) rc = correct_addresses_or_offsets_by_vectors(info, img, imglen);
     return rc;
 }
 
