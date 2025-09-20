@@ -114,6 +114,10 @@ typedef struct
 
     int32_t is_kallsysms_all_yes;
     enum current_type current_type;
+    
+    info->used_alternative_symbol = 0;
+    info->alternative_symbol_index = -1;
+    info->alternative_symbol_name = NULL;
 
 } kallsym_t;
 

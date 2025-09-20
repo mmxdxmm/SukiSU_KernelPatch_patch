@@ -41,31 +41,36 @@ static void *memmem(const void *haystack, size_t haystack_len, const void *const
 
 static int find_linux_banner(kallsym_t *info, char *img, int32_t imglen)
 {
-    /*
-	// todo: linux_proc_banner
-  const char linux_banner[] =
-        "Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
-        LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
-  Linux version 4.9.270-g862f51bac900-ab7613625 (android-build@abfarm-east4-101)
-  (Android (7284624, based on r416183b) clang version 12.0.5
-  (https://android.googlesource.com/toolchain/llvm-project
-  c935d99d7cf2016289302412d708641d52d2f7ee)) #0 SMP PREEMPT Thu Aug 5 07:04:42
-  UTC 2021
-  */
     char linux_banner_prefix[] = "Linux version ";
     size_t prefix_len = strlen(linux_banner_prefix);
 
     char *imgend = img + imglen;
     char *banner = (char *)img;
     info->banner_num = 0;
+    
+    memset(info->linux_banner_offset, 0, sizeof(info->linux_banner_offset));
+    
     while ((banner = (char *)memmem(banner + 1, imgend - banner - 1, linux_banner_prefix, prefix_len)) != NULL) {
-        if (isdigit(*(banner + prefix_len)) && *(banner + prefix_len + 1) == '.') {
+        if (isdigit(*(banner + prefix_len)) && 
+            (*(banner + prefix_len + 1) == '.' || isdigit(*(banner + prefix_len + 1)))) {
+            
+            if (info->banner_num >= MAX_BANNER_NUM) {
+                tools_logw("too many linux_banner found, stopping at %d\n", MAX_BANNER_NUM);
+                break;
+            }
+            
             info->linux_banner_offset[info->banner_num++] = (int32_t)(banner - img);
             tools_logi("linux_banner %d: %s", info->banner_num, banner);
             tools_logi("linux_banner offset: 0x%lx\n", banner - img);
         }
     }
-    banner = img + info->linux_banner_offset[info->banner_num - 1];
+    
+    if (info->banner_num == 0) {
+        tools_loge("no linux_banner found in image\n");
+        return -1;
+    }
+    
+    char *banner = img + info->linux_banner_offset[info->banner_num - 1];
 
     char *uts_release_start = banner + prefix_len;
     char *space = strchr(banner + prefix_len, ' ');
@@ -449,28 +454,29 @@ static int find_num_syms(kallsym_t *info, char *img, int32_t imglen)
 #define NSYMS_MAX_GAP 10
 
     int32_t approx_end = info->kallsyms_names_offset;
+    // int32_t num_syms_elem_size = get_num_syms_elem_size(info);
     int32_t num_syms_elem_size = 4;
 
     int32_t approx_num_syms = info->_approx_addresses_or_offsets_num;
 
-    for (int32_t cand = approx_end - 128; cand > approx_end - 4096; cand -= num_syms_elem_size) {
-        if (cand < 0) break;
-        
-        uint32_t nsyms = (uint32_t)int_unpack(img + cand, num_syms_elem_size, info->is_be);
-        
-        if (nsyms > 0 && nsyms < 1000000 && 
-            abs(nsyms - approx_num_syms) < NSYMS_MAX_GAP * 10) {
-            info->kallsyms_num_syms = nsyms;
-            info->kallsyms_num_syms_offset = cand;
-            tools_logi("kallsyms_num_syms offset: 0x%08x, value: 0x%08x\n", 
-                       info->kallsyms_num_syms_offset, info->kallsyms_num_syms);
-            return 0;
-        }
+    for (int32_t cand = approx_end; cand > approx_end - 4096; cand -= num_syms_elem_size) {
+        int nsyms = (int)int_unpack(img + cand, num_syms_elem_size, info->is_be);
+        if (!nsyms) continue;
+        if (approx_num_syms > nsyms && approx_num_syms - nsyms > NSYMS_MAX_GAP) continue;
+        if (nsyms > approx_num_syms && nsyms - approx_num_syms > NSYMS_MAX_GAP) continue;
+        // find
+        info->kallsyms_num_syms = nsyms;
+        info->kallsyms_num_syms_offset = cand;
+        break;
     }
 
-    info->kallsyms_num_syms = approx_num_syms;
-    info->kallsyms_num_syms_offset = 0;
-    tools_logw("can't find kallsyms_num_syms, use approx: 0x%08x\n", info->kallsyms_num_syms);
+    if (!info->kallsyms_num_syms_offset || !info->kallsyms_num_syms) {
+        info->kallsyms_num_syms = approx_num_syms - NSYMS_MAX_GAP;
+        tools_logw("can't find kallsyms_num_syms, try: 0x%08x\n", info->kallsyms_num_syms);
+    } else {
+        tools_logi("kallsyms_num_syms offset: 0x%08x, value: 0x%08x\n", info->kallsyms_num_syms_offset,
+                   info->kallsyms_num_syms);
+    }
     return 0;
 }
 
@@ -778,7 +784,7 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
     while (pos < info->kallsyms_markers_offset) {
         memset(symbol, 0, sizeof(symbol));
         int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
-        if (ret) break;
+        if (ret) return ret;
 
         if (!strcmp(symbol, "linux_banner")) {
             tools_logi("names table linux_banner index: 0x%08x\n", index);
@@ -789,9 +795,41 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
     }
 
     if (!found_linux_banner) {
-        tools_logw("no linux_banner in names table, trying alternative method\n");
+        tools_logw("linux_banner not found in names table, trying alternative symbols\n");
         
-        return correct_addresses_or_offsets_by_known_symbols(info, img, imglen);
+        pos = info->kallsyms_names_offset;
+        index = 0;
+        
+        const char* alternative_symbols[] = {
+            "init_task", "start_kernel", "cpu_number", "memstart_addr", 
+            "kern_addr_valid", "vmalloc", NULL
+        };
+        
+        int found_alternative = 0;
+        while (pos < info->kallsyms_markers_offset) {
+            memset(symbol, 0, sizeof(symbol));
+            int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
+            if (ret) return ret;
+
+            for (int i = 0; alternative_symbols[i] != NULL; i++) {
+                if (!strcmp(symbol, alternative_symbols[i])) {
+                    tools_logi("found alternative symbol: %s at index: 0x%08x\n", symbol, index);
+                    found_alternative = 1;
+                    info->used_alternative_symbol = 1;
+                    info->alternative_symbol_index = index;
+                    info->alternative_symbol_name = strdup(symbol);
+                    break;
+                }
+            }
+            
+            if (found_alternative) break;
+            index++;
+        }
+        
+        if (!found_alternative) {
+            tools_loge("no known symbols found in names table\n");
+            return -1;
+        }
     }
 
     info->symbol_banner_idx = -1;
@@ -805,7 +843,10 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
         int32_t end = pos + 4096 + elem_size;
         for (; pos < end; pos += elem_size) {
             uint64_t base = uint_unpack(img + pos, elem_size, info->is_be);
-            int32_t offset = uint_unpack(img + pos + index * elem_size, elem_size, info->is_be) - base;
+            
+            int32_t symbol_index = info->used_alternative_symbol ? info->alternative_symbol_index : index;
+            int32_t offset = uint_unpack(img + pos + symbol_index * elem_size, elem_size, info->is_be) - base;
+            
             if (offset == target_offset) break;
         }
         if (pos < end) {
@@ -814,10 +855,9 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
             break;
         }
     }
-    
     if (info->symbol_banner_idx < 0) {
-        tools_logw("correct address or offsets using linux_banner failed, trying alternative method\n");
-        return correct_addresses_or_offsets_by_known_symbols(info, img, imglen);
+        tools_loge("correct address or offsets error\n");
+        return -1;
     }
 
     int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
@@ -832,90 +872,35 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
         tools_logi("kernel base address: 0x%" PRIx64 "\n", info->kernel_base);
     }
 
-    int32_t pid_vnr_offset = get_symbol_offset(info, img, "pid_vnr");
-    if (arm64_verify_pid_vnr(info, img, pid_vnr_offset)) {
-        tools_logw("pid_vnr verification failed\n");
+    if (!info->used_alternative_symbol) {
+        int32_t pid_vnr_offset = get_symbol_offset(info, img, "pid_vnr");
+        if (arm64_verify_pid_vnr(info, img, pid_vnr_offset)) {
+            tools_logw("pid_vnr verification failed\n");
+        }
     }
 
     return 0;
 }
 
-static int correct_addresses_or_offsets_by_known_symbols(kallsym_t *info, char *img, int32_t imglen)
-{
-    const char* known_symbols[] = {
-        "_text", "_stext", "__init_begin", "__bss_start", 
-        "system_state", "init_task", "cpu_number", "memstart_addr"
-    };
-    const int num_known_symbols = sizeof(known_symbols) / sizeof(known_symbols[0]);
-    
-    int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
-    int32_t pos = info->_approx_addresses_or_offsets_offset;
-    
-    for (int i = 0; i < num_known_symbols; i++) {
-        int32_t symbol_index = find_symbol_index(info, img, known_symbols[i]);
-        if (symbol_index >= 0) {
-            uint64_t symbol_value = uint_unpack(img + pos + symbol_index * elem_size, elem_size, info->is_be);
-            tools_logi("Found known symbol %s at index %d, value 0x%" PRIx64 "\n", 
-                       known_symbols[i], symbol_index, symbol_value);
-            
-            if (info->has_relative_base) {
-                info->kallsyms_offsets_offset = pos;
-                tools_logi("kallsyms_offsets offset: 0x%08x\n", pos);
-            } else {
-                info->kallsyms_addresses_offset = pos;
-                tools_logi("kallsyms_addresses offset: 0x%08x\n", pos);
-                info->kernel_base = symbol_value - get_symbol_offset(info, img, known_symbols[i]);
-                tools_logi("kernel base address: 0x%" PRIx64 "\n", info->kernel_base);
-            }
-            
-            return 0;
-        }
-    }
-    
-    tools_loge("Could not find any known symbols for address correction\n");
-    return -1;
-}
-
-static int32_t find_symbol_index(kallsym_t *info, char *img, const char *symbol_name)
-{
-    int32_t pos = info->kallsyms_names_offset;
-    int32_t index = 0;
-    char symbol[KSYM_SYMBOL_LEN] = { '\0' };
-
-    while (pos < info->kallsyms_markers_offset) {
-        memset(symbol, 0, sizeof(symbol));
-        int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
-        if (ret) break;
-
-        if (!strcmp(symbol, symbol_name)) {
-            return index;
-        }
-        index++;
-    }
-    
-    return -1;
-}
-
 static int correct_addresses_or_offsets(kallsym_t *info, char *img, int32_t imglen)
 {
     int rc = 0;
-    
+#if 1
     rc = correct_addresses_or_offsets_by_banner(info, img, imglen);
-    if (rc == 0) {
-        info->is_kallsysms_all_yes = 1;
-        return 0;
+    info->is_kallsysms_all_yes = 1;
+#endif
+    if (rc) {
+        info->is_kallsysms_all_yes = 0;
+        tools_logw("no linux_banner, CONFIG_KALLSYMS_ALL=n\n");
+        
+        if (info->used_alternative_symbol) {
+            tools_logi("using alternative symbol %s for correction\n", info->alternative_symbol_name);
+            rc = 0;
+        } else {
+            rc = correct_addresses_or_offsets_by_vectors(info, img, imglen);
+        }
     }
-    
-    tools_logw("banner method failed, trying known symbols method\n");
-    info->is_kallsysms_all_yes = 0;
-    
-    rc = correct_addresses_or_offsets_by_known_symbols(info, img, imglen);
-    if (rc == 0) {
-        return 0;
-    }
-    
-    tools_logw("known symbols method failed, trying vectors method\n");
-    return correct_addresses_or_offsets_by_vectors(info, img, imglen);
+    return rc;
 }
 
 void init_arm64_kallsym_t(kallsym_t *info)
