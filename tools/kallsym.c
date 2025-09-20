@@ -39,38 +39,49 @@ static void *memmem(const void *haystack, size_t haystack_len, const void *const
 }
 #endif
 
-static int find_linux_banner(kallsym_t *info, char *img, int32_t imglen) {
+static int find_linux_banner(kallsym_t *info, char *img, int32_t imglen)
+{
+    /*
+	// todo: linux_proc_banner
+  const char linux_banner[] =
+        "Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
+        LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
+  Linux version 4.9.270-g862f51bac900-ab7613625 (android-build@abfarm-east4-101)
+  (Android (7284624, based on r416183b) clang version 12.0.5
+  (https://android.googlesource.com/toolchain/llvm-project
+  c935d99d7cf2016289302412d708641d52d2f7ee)) #0 SMP PREEMPT Thu Aug 5 07:04:42
+  UTC 2021
+  */
     char linux_banner_prefix[] = "Linux version ";
     size_t prefix_len = strlen(linux_banner_prefix);
+
     char *imgend = img + imglen;
-    char *banner = img;
+    char *banner = (char *)img;
     info->banner_num = 0;
-
-    while ((banner = memmem(banner, imgend - banner, linux_banner_prefix, prefix_len))) {
+    while ((banner = (char *)memmem(banner + 1, imgend - banner - 1, linux_banner_prefix, prefix_len)) != NULL) {
         if (isdigit(*(banner + prefix_len)) && *(banner + prefix_len + 1) == '.') {
-            info->linux_banner_offset[0] = (int32_t)(banner - img);
-            tools_logi("linux_banner: %s", banner);
-            tools_logi("linux_banner offset: 0x%08x\n", info->linux_banner_offset[0]);
-            break;
+            info->linux_banner_offset[info->banner_num++] = (int32_t)(banner - img);
+            tools_logi("linux_banner %d: %s", info->banner_num, banner);
+            tools_logi("linux_banner offset: 0x%lx\n", banner - img);
         }
-        banner++;
     }
-
-    if (!banner) {
-        tools_loge("No valid linux_banner found\n");
-        return -1;
-    }
+    banner = img + info->linux_banner_offset[info->banner_num - 1];
 
     char *uts_release_start = banner + prefix_len;
+    char *space = strchr(banner + prefix_len, ' ');
+
     char *dot = NULL;
 
+    // VERSION
     info->version.major = (uint8_t)strtoul(uts_release_start, &dot, 10);
+    // PATCHLEVEL
     info->version.minor = (uint8_t)strtoul(dot + 1, &dot, 10);
+    // SUBLEVEL
     int32_t patch = (int32_t)strtoul(dot + 1, &dot, 10);
     info->version.patch = patch <= 256 ? patch : 255;
 
-    tools_logi("kernel version: %d.%d.%d\n", 
-               info->version.major, info->version.minor, info->version.patch);
+    tools_logi("kernel version major: %d, minor: %d, patch: %d\n", info->version.major, info->version.minor,
+               info->version.patch);
     return 0;
 }
 
@@ -87,112 +98,99 @@ static int dump_kernel_config(kallsym_t *info, char *img, int32_t imglen)
     return 0;
 }
 
-static int find_token_table(kallsym_t *info, char *img, int32_t imglen) {
-    char nums_syms[20] = {0};
+static int find_token_table(kallsym_t *info, char *img, int32_t imglen)
+{
+    char nums_syms[20] = { '\0' };
     for (int32_t i = 0; i < 10; i++)
         nums_syms[i * 2] = '0' + i;
 
-    char letters_syms[20] = {0};
+    // We just check first 10 letters, not all letters are guaranteed to appear,
+    // In fact, the previous numbers may not always appear too.
+    char letters_syms[20] = { '\0' };
     for (int32_t i = 0; i < 10; i++)
         letters_syms[i * 2] = 'a' + i;
 
     char *pos = img;
     char *num_start = NULL;
     char *imgend = img + imglen;
-    
-    while (pos < imgend - sizeof(nums_syms)) {
-        num_start = memmem(pos, imgend - pos, nums_syms, sizeof(nums_syms));
+    for (; pos < imgend; pos = num_start + 1) {
+        num_start = (char *)memmem(pos, imgend - pos, nums_syms, sizeof(nums_syms));
         if (!num_start) {
-            tools_loge("find token_table error: nums_syms not found\n");
+            tools_loge("find token_table error\n");
             return -1;
         }
-        
         char *num_end = num_start + sizeof(nums_syms);
-        if (num_end >= imgend) {
-            pos = num_start + 1;
-            continue;
-        }
+        if (!*num_end || !*(num_end + 1)) continue;
 
         char *letter = num_end;
-        int32_t null_count = 0;
-        while (letter < imgend && null_count < ('a' - '9' - 1)) {
-            if (*letter == '\0') null_count++;
-            letter++;
+        for (int32_t i = 0; letter < imgend && i < 'a' - '9' - 1; letter++) {
+            if (!*letter) i++;
         }
-        
-        if (letter + sizeof(letters_syms) > imgend) {
-            pos = num_start + 1;
-            continue;
-        }
-        
-        if (memcmp(letter, letters_syms, sizeof(letters_syms)) {
-            pos = num_start + 1;
-            continue;
-        }
+        if (letter != (char *)memmem(letter, sizeof(letters_syms), letters_syms, sizeof(letters_syms))) continue;
         break;
     }
 
-    if (!num_start) {
-        tools_loge("token_table not found\n");
-        return -1;
+    // backward to start
+    pos = num_start;
+    for (int32_t i = 0; pos > img && i < '0' + 1; pos--) {
+        if (!*pos) i++;
     }
+    int32_t offset = pos + 2 - img;
 
-    char *start_ptr = num_start;
-    int null_count = 0;
-    while (start_ptr > img && null_count < 2) {
-        start_ptr--;
-        if (*start_ptr == '\0') null_count++;
-    }
-    
-    if (null_count < 2) {
-        tools_loge("invalid token_table start\n");
-        return -1;
-    }
-    
-    int32_t offset = (int32_t)(start_ptr + 1 - img);
+    // align
     offset = align_ceil(offset, 4);
+
     info->kallsyms_token_table_offset = offset;
+
     tools_logi("kallsyms_token_table offset: 0x%08x\n", offset);
 
-    char *pos_ptr = img + offset;
-    for (int32_t i = 0; i < KSYM_TOKEN_NUMS && pos_ptr < imgend; i++) {
-        info->kallsyms_token_table[i] = pos_ptr;
-        while (pos_ptr < imgend && *pos_ptr) pos_ptr++;
-        pos_ptr++;
+    // rebuild token_table
+    pos = img + info->kallsyms_token_table_offset;
+    for (int32_t i = 0; i < KSYM_TOKEN_NUMS; i++) {
+        info->kallsyms_token_table[i] = pos;
+        while (*(pos++)) {
+        };
     }
+    // tools_logi("token table: ");
+    // for (int32_t i = 0; i < KSYM_TOKEN_NUMS; i++) {
+    //   printf("%s ", info->kallsyms_token_table[i]);
+    // }
+    // printf("\n");
     return 0;
 }
 
-static int find_token_index(kallsym_t *info, char *img, int32_t imglen) {
-    uint16_t le_index[KSYM_TOKEN_NUMS] = {0};
-    uint16_t be_index[KSYM_TOKEN_NUMS] = {0};
+static int find_token_index(kallsym_t *info, char *img, int32_t imglen)
+{
+    uint16_t le_index[KSYM_TOKEN_NUMS] = { 0 };
+    uint16_t be_index[KSYM_TOKEN_NUMS] = { 0 };
 
     int32_t start = info->kallsyms_token_table_offset;
     int32_t offset = start;
-    char *imgend = img + imglen;
 
-    for (int32_t i = 0; i < KSYM_TOKEN_NUMS && offset < imglen; i++) {
-        uint16_t token_index = (uint16_t)(offset - start);
+    // build kallsyms_token_index according to kallsyms_token_table
+    for (int32_t i = 0; i < KSYM_TOKEN_NUMS; i++) {
+        uint16_t token_index = offset - start;
         le_index[i] = u16le(token_index);
         be_index[i] = u16be(token_index);
-        while (offset < imglen && img[offset]) offset++;
-        offset++;
+        while (img[offset++]) {
+        };
     }
-
-    char *lepos = memmem(img, imglen, le_index, sizeof(le_index));
-    char *bepos = memmem(img, imglen, be_index, sizeof(be_index));
+    // find kallsyms_token_index
+    char *lepos = (char *)memmem(img, imglen, le_index, sizeof(le_index));
+    char *bepos = (char *)memmem(img, imglen, be_index, sizeof(be_index));
 
     if (!lepos && !bepos) {
-        tools_loge("kallsyms_token_index not found\n");
+        tools_loge("kallsyms_token_index error\n");
         return -1;
     }
+    tools_logi("endian: %s\n", lepos ? "little" : "big");
 
     char *pos = lepos ? lepos : bepos;
     info->is_be = lepos ? 0 : 1;
-    info->kallsyms_token_index_offset = (int32_t)(pos - img);
+
+    info->kallsyms_token_index_offset = pos - img;
 
     tools_logi("kallsyms_token_index offset: 0x%08x\n", info->kallsyms_token_index_offset);
-    tools_logi("endian: %s\n", lepos ? "little" : "big");
     return 0;
 }
 
@@ -899,7 +897,8 @@ R kallsyms_markers
 R kallsyms_token_table
 R kallsyms_token_index
 */
-int analyze_kallsym_info(kallsym_t *info, char *img, int32_t imglen, enum arch_type arch, int32_t is_64) {
+int analyze_kallsym_info(kallsym_t *info, char *img, int32_t imglen, enum arch_type arch, int32_t is_64)
+{
     memset(info, 0, sizeof(kallsym_t));
     info->is_64 = is_64;
     info->asm_long_size = 4;
@@ -913,47 +912,33 @@ int analyze_kallsym_info(kallsym_t *info, char *img, int32_t imglen, enum arch_t
         find_token_table,
         find_token_index,
     };
-    
     for (int i = 0; i < (int)(sizeof(base_funcs) / sizeof(base_funcs[0])); i++) {
-        if ((rc = base_funcs[i](info, img, imglen))) {
-            tools_loge("base_funcs[%d] failed: %d\n", i, rc);
-            return rc;
-        }
+        if ((rc = base_funcs[i](info, img, imglen))) return rc;
     }
 
-    char *copied_img = malloc(imglen);
-    if (!copied_img) {
-        tools_loge("memory allocation failed\n");
-        return -1;
-    }
+    char *copied_img = (char *)malloc(imglen);
     memcpy(copied_img, img, imglen);
 
-    int max_retries = 3;
-    for (int attempt = 0; attempt < max_retries; attempt++) {
+    // 1st
+    rc = retry_relo(info, copied_img, imglen);
+    if (!rc) goto out;
+
+    // 2nd
+    if (!info->try_relo) {
+        memcpy(copied_img, img, imglen);
         rc = retry_relo(info, copied_img, imglen);
-        if (!rc) break;
-        
-        tools_logi("retry_relo attempt %d failed, rc=%d\n", attempt+1, rc);
-        
-        if (attempt == 0 && info->try_relo) {
-            info->try_relo = 0;
-            memcpy(copied_img, img, imglen);
-            continue;
-        }
-        
-        if (attempt == 1 && info->kernel_base != ELF64_KERNEL_MIN_VA) {
-            info->kernel_base = ELF64_KERNEL_MIN_VA;
-            memcpy(copied_img, img, imglen);
-            continue;
-        }
+        if (!rc) goto out;
     }
 
-    if (rc) {
-        tools_loge("all retry_relo attempts failed\n");
-    } else {
-        memcpy(img, copied_img, imglen);
+    // 3rd
+    if (info->kernel_base != ELF64_KERNEL_MIN_VA) {
+        info->kernel_base = ELF64_KERNEL_MIN_VA;
+        memcpy(copied_img, img, imglen);
+        rc = retry_relo(info, copied_img, imglen);
     }
-    
+
+out:
+    memcpy(img, copied_img, imglen);
     free(copied_img);
     return rc;
 }
