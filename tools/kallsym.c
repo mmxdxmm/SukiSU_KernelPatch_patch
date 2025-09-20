@@ -777,7 +777,7 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
     int32_t pos = info->kallsyms_names_offset;
     int32_t index = 0;
     char symbol[KSYM_SYMBOL_LEN] = { '\0' };
-    int found_linux_banner = 0;
+    int found = 0;
 
     while (pos < info->kallsyms_markers_offset) {
         memset(symbol, 0, sizeof(symbol));
@@ -785,51 +785,53 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
         if (ret) return ret;
 
         if (strstr(symbol, "linux_banner")) {
-            tools_logi("Found matching symbol: %s at index: 0x%08x\n", symbol, index);
-            found_linux_banner = 1;
+            tools_logi("Found symbol containing 'linux_banner': %s at index: 0x%08x\n", symbol, index);
+            found = 1;
             break;
         }
         index++;
     }
 
-    if (!found_linux_banner) {
-        tools_loge("No linux_banner found in names table. Searched %d symbols\n", index);
+    if (!found) {
+        tools_loge("no linux_banner in names table\n");
         return -1;
     }
     info->symbol_banner_idx = -1;
 
-    int32_t elem_size = info->has_relative_base ? 
-        get_offsets_elem_size(info) : get_addresses_elem_size(info);
+    int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
     int32_t search_range = info->kallsyms_num_syms * elem_size + 4096;
-    
-    tools_logi("Search range: 0x%08x to 0x%08x\n", 
-               info->_approx_addresses_or_offsets_offset,
-               info->_approx_addresses_or_offsets_offset + search_range);
+    tools_logi("Search range: %d bytes (symbols: %d, elem_size: %d)\n", 
+               search_range, info->kallsyms_num_syms, elem_size);
 
     for (int i = 0; i < info->banner_num; i++) {
         int32_t target_offset = info->linux_banner_offset[i];
         pos = info->_approx_addresses_or_offsets_offset;
-        int32_t end = pos + search_range;
 
+        int32_t end = pos + search_range;
+        tools_logi("Searching for banner offset 0x%08x in range [0x%08x, 0x%08x)\n",
+                   target_offset, pos, end);
+        
         for (; pos < end; pos += elem_size) {
             uint64_t base = uint_unpack(img + pos, elem_size, info->is_be);
             int32_t offset = uint_unpack(img + pos + index * elem_size, elem_size, info->is_be) - base;
             
             if (offset == target_offset) {
+                tools_logi("Found matching offset at position 0x%08x\n", pos);
                 info->symbol_banner_idx = i;
-                tools_logi("Matched linux_banner at index: %d, offset: 0x%08x\n", i, pos);
                 break;
             }
         }
-        if (info->symbol_banner_idx >= 0) break;
+        
+        if (info->symbol_banner_idx >= 0) {
+            tools_logi("linux_banner index: %d\n", i);
+            break;
+        }
     }
-
+    
     if (info->symbol_banner_idx < 0) {
-        tools_loge("Failed to correct address or offsets after %d attempts\n", info->banner_num);
+        tools_loge("correct address or offsets error: searched %d symbols\n", index);
         return -1;
     }
-
-    int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
 
     if (info->has_relative_base) {
         info->kallsyms_offsets_offset = pos;
