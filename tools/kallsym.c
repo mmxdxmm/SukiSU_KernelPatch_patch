@@ -780,7 +780,7 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
         int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
         if (ret) return ret;
         
-        tools_logd("Decompressed symbol: %s\n", symbol);
+        tools_logi("Decompressed symbol: %s\n", symbol);
 
         if (!strcmp(symbol, "linux_banner")) {
             tools_logi("names table linux_banner index: 0x%08x\n", index);
