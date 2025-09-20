@@ -82,9 +82,6 @@ static int find_linux_banner(kallsym_t *info, char *img, int32_t imglen)
 
     tools_logi("kernel version major: %d, minor: %d, patch: %d\n", info->version.major, info->version.minor,
                info->version.patch);
-
-    tools_logi("Banner virtual address: %p", (void*)(banner - img + info->kernel_base));
-    
     return 0;
 }
 
@@ -265,8 +262,8 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
 
     int32_t cand_start = cand - 24 * rela_num;
     int32_t cand_end = cand - 24;
-    while (1) {
-        if (*(uint64_t *)(img + cand_end) && *(uint64_t *)(img + cand_end + 8) && *(uint64_t *)(img + cand_end + 16))
+    while (cand_end > cand_start) {
+        if (*(uint64_t *)(img + cand_end) || *(uint64_t *)(img + cand_end + 8) || *(uint64_t *)(img + cand_end + 16))
             break;
         cand_end -= 24;
     }
@@ -289,15 +286,13 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
         uint64_t r_addend = uint_unpack(img + cand + 16, 8, info->is_be);
         if (!r_offset && !r_info && !r_addend) continue;
         if (r_offset <= kernel_va || r_offset >= max_va - imglen) {
-            // tools_logw("warn ignore arm64 relocation r_offset: 0x%08lx at 0x%08x\n", r_offset, cand);
             continue;
         }
 
         int32_t offset = r_offset - kernel_va;
         if (offset < 0 || offset >= max_offset) {
-            tools_logw("bad rela offset: 0x%" PRIx64 "\n", r_offset);
-            info->try_relo = 0;
-            return -1;
+            tools_logw("bad rela offset: 0x%" PRIx64 ", skipping\n", r_offset);
+            continue; // Skip invalid relocation
         }
 
         uint64_t value = uint_unpack(img + offset, 8, info->is_be);
@@ -309,14 +304,6 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
     tools_logi("apply 0x%08x relocation entries\n", apply_num);
 
     if (apply_num) info->relo_applied = 1;
-
-#if 0
-#include <stdio.h>
-    FILE *frelo = fopen("./kernel.relo", "wb+");
-    int w_len = fwrite(img, 1, imglen, frelo);
-    tools_logi("===== write relo kernel image: %d ====\n", w_len);
-    fclose(frelo);
-#endif
 
     return 0;
 }
@@ -450,9 +437,9 @@ static int32_t find_approx_addresses_or_offset(kallsym_t *info, char *img, int32
 static int find_num_syms(kallsym_t *info, char *img, int32_t imglen)
 {
 #define NSYMS_MAX_GAP 10
+#define NSYMS_MAX_REASONABLE 0x1000000 // 16 million symbols should be enough
 
     int32_t approx_end = info->kallsyms_names_offset;
-    // int32_t num_syms_elem_size = get_num_syms_elem_size(info);
     int32_t num_syms_elem_size = 4;
 
     int32_t approx_num_syms = info->_approx_addresses_or_offsets_num;
@@ -460,6 +447,10 @@ static int find_num_syms(kallsym_t *info, char *img, int32_t imglen)
     for (int32_t cand = approx_end; cand > approx_end - 4096; cand -= num_syms_elem_size) {
         int nsyms = (int)int_unpack(img + cand, num_syms_elem_size, info->is_be);
         if (!nsyms) continue;
+        if (nsyms > NSYMS_MAX_REASONABLE) {
+            tools_logw("unreasonable nsyms value 0x%x at 0x%x, skipping\n", nsyms, cand);
+            continue;
+        }
         if (approx_num_syms > nsyms && approx_num_syms - nsyms > NSYMS_MAX_GAP) continue;
         if (nsyms > approx_num_syms && nsyms - approx_num_syms > NSYMS_MAX_GAP) continue;
         // find
@@ -777,61 +768,52 @@ static int correct_addresses_or_offsets_by_banner(kallsym_t *info, char *img, in
     int32_t pos = info->kallsyms_names_offset;
     int32_t index = 0;
     char symbol[KSYM_SYMBOL_LEN] = { '\0' };
-    int found = 0;
 
     while (pos < info->kallsyms_markers_offset) {
         memset(symbol, 0, sizeof(symbol));
         int32_t ret = decompress_symbol_name(info, img, &pos, NULL, symbol);
         if (ret) return ret;
 
-        if (strstr(symbol, "linux_banner")) {
-            tools_logi("Found symbol containing 'linux_banner': %s at index: 0x%08x\n", symbol, index);
-            found = 1;
+        if (!strcmp(symbol, "linux_banner")) {
+            tools_logi("names table linux_banner index: 0x%08x\n", index);
             break;
+        }
+        if (!strcmp(symbol, "pid_vnr")) {
         }
         index++;
     }
 
-    if (!found) {
+    if (pos >= info->kallsyms_markers_offset) {
         tools_loge("no linux_banner in names table\n");
         return -1;
     }
     info->symbol_banner_idx = -1;
 
-    int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
-    int32_t search_range = info->kallsyms_num_syms * elem_size + 4096;
-    tools_logi("Search range: %d bytes (symbols: %d, elem_size: %d)\n", 
-               search_range, info->kallsyms_num_syms, elem_size);
-
+    // find correct addresses or offsets
     for (int i = 0; i < info->banner_num; i++) {
         int32_t target_offset = info->linux_banner_offset[i];
+
+        int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
         pos = info->_approx_addresses_or_offsets_offset;
 
-        int32_t end = pos + search_range;
-        tools_logi("Searching for banner offset 0x%08x in range [0x%08x, 0x%08x)\n",
-                   target_offset, pos, end);
-        
+        int32_t end = pos + 4096 + elem_size;
         for (; pos < end; pos += elem_size) {
             uint64_t base = uint_unpack(img + pos, elem_size, info->is_be);
             int32_t offset = uint_unpack(img + pos + index * elem_size, elem_size, info->is_be) - base;
-            
-            if (offset == target_offset) {
-                tools_logi("Found matching offset at position 0x%08x\n", pos);
-                info->symbol_banner_idx = i;
-                break;
-            }
+            if (offset == target_offset) break;
         }
-        
-        if (info->symbol_banner_idx >= 0) {
+        if (pos < end) {
+            info->symbol_banner_idx = i;
             tools_logi("linux_banner index: %d\n", i);
             break;
         }
     }
-    
     if (info->symbol_banner_idx < 0) {
-        tools_loge("correct address or offsets error: searched %d symbols\n", index);
+        tools_loge("correct address or offsets error\n");
         return -1;
     }
+
+    int32_t elem_size = info->has_relative_base ? get_offsets_elem_size(info) : get_addresses_elem_size(info);
 
     if (info->has_relative_base) {
         info->kallsyms_offsets_offset = pos;
@@ -925,32 +907,51 @@ int analyze_kallsym_info(kallsym_t *info, char *img, int32_t imglen, enum arch_t
         find_token_index,
     };
     for (int i = 0; i < (int)(sizeof(base_funcs) / sizeof(base_funcs[0])); i++) {
-        if ((rc = base_funcs[i](info, img, imglen))) return rc;
+        if ((rc = base_funcs[i](info, img, imglen))) {
+            tools_loge("base_funcs[%d] error: %d\n", i, rc);
+            return rc;
+        }
     }
 
     char *copied_img = (char *)malloc(imglen);
+    if (!copied_img) {
+        tools_loge("malloc failed for copied_img\n");
+        return -1;
+    }
     memcpy(copied_img, img, imglen);
 
-    // 1st
+    // 1st try with relocation
     rc = retry_relo(info, copied_img, imglen);
     if (!rc) goto out;
 
-    // 2nd
-    if (!info->try_relo) {
-        memcpy(copied_img, img, imglen);
-        rc = retry_relo(info, copied_img, imglen);
-        if (!rc) goto out;
-    }
+    // 2nd try: if first failed, try without relocation
+    tools_logw("First retry_relo failed, trying without relocation\n");
+    info->try_relo = 0; // disable relocation
+    memcpy(copied_img, img, imglen);
+    rc = retry_relo(info, copied_img, imglen);
+    if (!rc) goto out;
 
-    // 3rd
-    if (info->kernel_base != ELF64_KERNEL_MIN_VA) {
-        info->kernel_base = ELF64_KERNEL_MIN_VA;
-        memcpy(copied_img, img, imglen);
-        rc = retry_relo(info, copied_img, imglen);
-    }
+    // 3rd try: try with different kernel base
+    tools_logw("Second retry_relo failed, trying with default kernel base\n");
+    info->kernel_base = ELF64_KERNEL_MIN_VA;
+    memcpy(copied_img, img, imglen);
+    rc = retry_relo(info, copied_img, imglen);
+    if (!rc) goto out;
+
+    // 4th try: fallback to without relocation and use default values
+    tools_logw("All retry failed, trying fallback method\n");
+    // Reset relocation settings and retry
+    info->try_relo = 0;
+    info->kernel_base = 0;
+    memcpy(copied_img, img, imglen);
+    rc = retry_relo(info, copied_img, imglen);
 
 out:
-    memcpy(img, copied_img, imglen);
+    if (rc == 0) {
+        memcpy(img, copied_img, imglen);
+    } else {
+        tools_loge("retry_relo failed after all attempts\n");
+    }
     free(copied_img);
     return rc;
 }
