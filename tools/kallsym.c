@@ -246,7 +246,6 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
         if ((r_offset & 0xffff000000000000) == 0xffff000000000000 && r_info == 0x403) {
             if (!(r_addend & 0xfff) && r_addend >= min_va && r_addend < kernel_va) {
                 kernel_va = r_addend;
-                tools_logd("Found candidate kernel_va: 0x%" PRIx64 "\n", kernel_va);
             }
             cand += 24;
             rela_num++;
@@ -266,6 +265,10 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
         kernel_va = 0xffffff8008000000;
     } else if (kernel_va > 0xffffff8400000000) {
         tools_logw("Estimated kernel_va (0x%" PRIx64 ") seems too high. Checking validity.\n", kernel_va);
+        /* if (!is_likely_kernel_start(img, imglen, kernel_va)) { */
+        /*     kernel_va = 0xffffff8008000000; */
+        /*     tools_logw("Falling back to default kernel_va: 0x%" PRIx64 "\n", kernel_va); */
+        /* } */
     }
 
     if (info->kernel_base) {
