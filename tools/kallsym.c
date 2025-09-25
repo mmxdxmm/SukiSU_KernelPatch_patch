@@ -228,25 +228,17 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
 {
     if (!info->try_relo) return 0;
 
-    uint64_t min_va = 0xffffff8008000000;
-    uint64_t max_va = 0xffffffffffffffff;
+    uint64_t min_va = ELF64_KERNEL_MIN_VA;
+    uint64_t max_va = ELF64_KERNEL_MAX_VA;
     uint64_t kernel_va = max_va;
     int32_t cand = 0;
     int rela_num = 0;
-
-    if (info->kernel_base) {
-        tools_logi("Using provided kernel base: 0x%" PRIx64 "\n", info->kernel_base);
-        kernel_va = info->kernel_base;
-    }
-
     while (cand < imglen - 24) {
         uint64_t r_offset = uint_unpack(img + cand, 8, info->is_be);
         uint64_t r_info = uint_unpack(img + cand + 8, 8, info->is_be);
         uint64_t r_addend = uint_unpack(img + cand + 16, 8, info->is_be);
         if ((r_offset & 0xffff000000000000) == 0xffff000000000000 && r_info == 0x403) {
-            if (!(r_addend & 0xfff) && r_addend >= min_va && r_addend < kernel_va) {
-                kernel_va = r_addend;
-            }
+            if (!(r_addend & 0xfff) && r_addend >= min_va && r_addend < kernel_va) kernel_va = r_addend;
             cand += 24;
             rela_num++;
         } else if (rela_num && !r_offset && !r_info && !r_addend) {
@@ -258,17 +250,6 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
             rela_num = 0;
             kernel_va = max_va;
         }
-    }
-
-    if (kernel_va == max_va) {
-        tools_logw("Failed to estimate kernel_va from reloc table. Using default.\n");
-        kernel_va = 0xffffff8008000000;
-    } else if (kernel_va > 0xffffff8400000000) {
-        tools_logw("Estimated kernel_va (0x%" PRIx64 ") seems too high. Checking validity.\n", kernel_va);
-        /* if (!is_likely_kernel_start(img, imglen, kernel_va)) { */
-        /*     kernel_va = 0xffffff8008000000; */
-        /*     tools_logw("Falling back to default kernel_va: 0x%" PRIx64 "\n", kernel_va); */
-        /* } */
     }
 
     if (info->kernel_base) {
@@ -311,10 +292,9 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
 
         int32_t offset = r_offset - kernel_va;
         if (offset < 0 || offset >= max_offset) {
-            tools_logw("bad rela offset: 0x%" PRIx64 " (calculated offset: 0x%x, kernel_va: 0x%" PRIx64 ", imglen: 0x%x)\n", r_offset, offset, kernel_va, imglen);
-            /* info->try_relo = 0; */
-            /* return -1; */
-            continue;
+            tools_logw("bad rela offset: 0x%" PRIx64 "\n", r_offset);
+            info->try_relo = 0;
+            return -1;
         }
 
         uint64_t value = uint_unpack(img + offset, 8, info->is_be);
@@ -326,6 +306,14 @@ static int try_find_arm64_relo_table(kallsym_t *info, char *img, int32_t imglen)
     tools_logi("apply 0x%08x relocation entries\n", apply_num);
 
     if (apply_num) info->relo_applied = 1;
+
+#if 0
+#include <stdio.h>
+    FILE *frelo = fopen("./kernel.relo", "wb+");
+    int w_len = fwrite(img, 1, imglen, frelo);
+    tools_logi("===== write relo kernel image: %d ====\n", w_len);
+    fclose(frelo);
+#endif
 
     return 0;
 }
